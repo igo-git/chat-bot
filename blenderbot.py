@@ -1,36 +1,13 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteriaList, StoppingCriteria
+from transformers import BlenderbotTokenizer, BlenderbotForConditionalGeneration
 import torch
 import sys
-from prompting import build_prompt_for
 import yaml
 from yaml.loader import SafeLoader
 
-class _SentinelTokenStoppingCriteria(StoppingCriteria):
-
-    def __init__(self, sentinel_token_ids: torch.LongTensor,
-                 starting_idx: int):
-        StoppingCriteria.__init__(self)
-        self.sentinel_token_ids = sentinel_token_ids
-        self.starting_idx = starting_idx
-
-    def __call__(self, input_ids: torch.LongTensor,
-                 _scores: torch.FloatTensor) -> bool:
-        for sample in input_ids:
-            trimmed_sample = sample[self.starting_idx:]
-            # Can't unfold, output is still too tiny. Skip.
-            if trimmed_sample.shape[-1] < self.sentinel_token_ids.shape[-1]:
-                continue
-
-            for window in trimmed_sample.unfold(
-                    0, self.sentinel_token_ids.shape[-1], 1):
-                if torch.all(torch.eq(self.sentinel_token_ids, window)):
-                    return True
-        return False
-
 def initializeModel(model_name):
     print('Initialization of ' + model_name + ' bot.')
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = BlenderbotForConditionalGeneration.from_pretrained(model_name)
+    tokenizer = BlenderbotTokenizer.from_pretrained(model_name)
     print('Bot ' + model_name + ' initialized.')
     return model, tokenizer
 
@@ -83,7 +60,7 @@ class ChatBot():
             self.need_voice = config['chat_bot']['need_voice']
         else:
             self.need_voice = False
-        self.getAnswer = self.getAnswerPygmalion
+        self.getAnswer = self.getAnswerBlenderbot
 
     def getFormattedHistory(self):
         hist = ''
@@ -91,56 +68,22 @@ class ChatBot():
             hist += '***' + line.split(':', 1)[0] + ':*** ' + line.split(':', 1)[1] + '\n\n'
         return hist
 
+    def getAnswerBlenderbot(self, message):
+        inputs = self.tokenizer([message], return_tensors='pt')
+        reply_ids = self.model.generate(**inputs, max_new_tokens=40)
+        answer = self.char_name + ': ' + self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)[0]
+        return answer
 
-    def getAnswerPygmalion(self, message):
-        prompt = build_prompt_for(history=self.history, 
-                                  user_message=message, 
-                                  char_name=self.char_name, 
-                                  char_persona=self.char_persona,
-                                  example_dialogue=self.example_dialogue)
-        inputs = self.tokenizer([prompt], return_tensors='pt')
-
-        # Atrocious code to stop generation when the model outputs "\nYou: " in
-        # freshly generated text. Feel free to send in a PR if you know of a
-        # cleaner way to do this.
-        stopping_criteria_list = StoppingCriteriaList([
-            _SentinelTokenStoppingCriteria(
-                sentinel_token_ids=self.tokenizer(
-                    "\nYou:",
-                    add_special_tokens=False,
-                    return_tensors="pt",
-                ).input_ids,
-                starting_idx=inputs.input_ids.shape[-1])
-        ])
-
-        reply_ids = self.model.generate(stopping_criteria=stopping_criteria_list,
-                                   **inputs, 
-                                   num_return_sequences=1, 
-                                   max_length=512,
-                                   do_sample=True,
-                                   top_k=50,
-                                   top_p=0.725,
-                                   temperature=0.72,
-                                   eos_token_id=198, 
-                                   pad_token_id=self.tokenizer.eos_token_id
-                               )
-        answer = self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)[0]
-        print('-'*20)
-        print(answer)
-        print('-'*20)
-        if (idx := prompt.rfind(message)) > 0:
-            answer = answer[idx + len(message) + 1:]
-        if (you := answer.find('\nYou:')) > 0:
-            answer = answer[:you]
-        self.history.append('You: ' + message)
-        self.history.append(answer)
-        if self.history_file_name is not None:
-            try:
-                with open(self.history_file_name, 'a') as f:
-                    f.write('You: ' + message + '\n')
-                    f.write(answer + '\n')
-            except Exception:
-                pass
+    def getAnswerBlenderbotWithHistory(self, message):
+        user_input_ids = self.tokenizer(message + self.tokenizer.eos_token, return_tensors='pt')
+        if self.first_step:
+            self.first_step = False
+            bot_input_ids = user_input_ids
+        else:
+            bot_input_ids = torch.cat([self.chat_history_ids, user_input_ids], dim=-1)
+        self.chat_history_ids = self.model.generate(**bot_input_ids, max_length=1000, pad_token_id=self.tokenizer.eos_token_id)
+#        answer = self.char_name + ': ' + self.tokenizer.decode(self.chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)
+        answer = self.char_name + ': ' + self.tokenizer.batch_decode(self.chat_history_ids, skip_special_tokens=True)[0]
         return answer
 
     def load_config_data(self):

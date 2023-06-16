@@ -6,7 +6,7 @@ import simpleaudio as sa
 import yaml
 from yaml.loader import SafeLoader
 
-with open('config.yaml') as file:
+with open('bots/config.yaml') as file:
     config = yaml.load(file, Loader=SafeLoader)
 
 oauth_token = config['yandex_cloud']['oauth_token']

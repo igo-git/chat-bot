@@ -1,5 +1,6 @@
 _test/
 # Bot configuration files
+bots/
 *.yaml
 *.cfg
 

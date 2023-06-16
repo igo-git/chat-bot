@@ -1,3 +1,4 @@
+from transformers import BlenderbotTokenizer, BlenderbotForConditionalGeneration
 from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteriaList, StoppingCriteria
 import torch
 import sys
@@ -28,11 +29,20 @@ class _SentinelTokenStoppingCriteria(StoppingCriteria):
         return False
 
 def initializeModel(model_name):
-    print('Initialization of ' + model_name + ' bot.')
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    print('Bot ' + model_name + ' initialized.')
-    return model, tokenizer
+    model_sub_name = model_name.split('/')[1]
+    if model_sub_name.startswith('blenderbot'):
+        print('Initialization of ' + model_name + ' bot.')
+        model = BlenderbotForConditionalGeneration.from_pretrained(model_name)
+        tokenizer = BlenderbotTokenizer.from_pretrained(model_name)
+        print('Bot ' + model_name + ' initialized.')
+        return model, tokenizer
+    else:
+        print('Initialization of ' + model_name + ' bot.')
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        print('Bot ' + model_name + ' initialized.')
+        return model, tokenizer
+    return None, None
 
 class ChatBot():
     def __init__(self, config_file_name='config.yaml'):
@@ -83,7 +93,13 @@ class ChatBot():
             self.need_voice = config['chat_bot']['need_voice']
         else:
             self.need_voice = False
-        self.getAnswer = self.getAnswerPygmalion
+        model_sub_name = self.model_name.split('/')[1]
+        if model_sub_name.startswith('pygmalion'):
+            self.getAnswer = self.getAnswerPygmalion
+        elif model_sub_name.startswith('ruDialoGPT'):
+            self.getAnswer = self.getAnswerRuDialoGPT
+        elif model_sub_name.startswith('blenderbot'):
+            self.getAnswer = self.getAnswerBlenderbot
 
     def getFormattedHistory(self):
         hist = ''
@@ -91,6 +107,65 @@ class ChatBot():
             hist += '***' + line.split(':', 1)[0] + ':*** ' + line.split(':', 1)[1] + '\n\n'
         return hist
 
+    def getAnswerBlenderbot(self, message):
+        inputs = self.tokenizer([message], return_tensors='pt')
+        reply_ids = self.model.generate(**inputs, max_new_tokens=40)
+        answer = self.char_name + ': ' + self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)[0]
+        return answer
+
+    def getAnswerBlenderbotWithHistory(self, message):
+        user_input_ids = self.tokenizer(message + self.tokenizer.eos_token, return_tensors='pt')
+        if self.first_step:
+            self.first_step = False
+            bot_input_ids = user_input_ids
+        else:
+            bot_input_ids = torch.cat([self.chat_history_ids, user_input_ids], dim=-1)
+        self.chat_history_ids = self.model.generate(**bot_input_ids, max_length=1000, pad_token_id=self.tokenizer.eos_token_id)
+#        answer = self.char_name + ': ' + self.tokenizer.decode(self.chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)
+        answer = self.char_name + ': ' + self.tokenizer.batch_decode(self.chat_history_ids, skip_special_tokens=True)[0]
+        return answer
+
+    def getAnswerRuDialoGPT(self, message):
+        if len(self.history) < 2:
+            prompt = '@@ПЕРВЫЙ@@' + message + '@@ВТОРОЙ@@'
+        else:
+            prompt = '@@ПЕРВЫЙ@@' + self.history[-2].split(':', 1)[1].strip() + '@@ВТОРОЙ@@' + self.history[-1].split(':', 1)[1].strip() + '@@ПЕРВЫЙ@@' + message + '@@ВТОРОЙ@@'
+        print('-'*20)
+        print('Prompt: ' + prompt)
+        inputs = self.tokenizer([prompt], return_tensors='pt')
+        reply_ids = self.model.generate(
+            **inputs,
+            top_k=10,
+            top_p=0.95,
+            num_beams=3,
+            num_return_sequences=1,
+            do_sample=True,
+            no_repeat_ngram_size=2,
+            temperature=1.2,
+            repetition_penalty=1.2,
+            length_penalty=1.0,
+            eos_token_id=50257,
+            max_new_tokens=40,
+            pad_token_id=self.tokenizer.eos_token_id
+        )
+        answer = self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)[0]
+        print('-'*20)
+        print(self.char_name + ': ' + answer)
+        print('-'*20)
+        answer = answer[len(prompt):]
+        if (idx := answer.find('@@')) != -1:
+            answer = answer[:idx]
+        answer = self.char_name + ': ' + answer
+        self.history.append('You: ' + message)
+        self.history.append(answer)
+        if self.history_file_name is not None:
+            try:
+                with open(self.history_file_name, 'a') as f:
+                    f.write('You: ' + message + '\n')
+                    f.write(answer + '\n')
+            except Exception:
+                pass
+        return answer
 
     def getAnswerPygmalion(self, message):
         prompt = build_prompt_for(history=self.history, 

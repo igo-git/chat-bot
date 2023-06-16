@@ -2,16 +2,12 @@
 
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QTextEdit
 from PyQt6.QtGui import QTextCursor
-from ann_bot import AnnBot
-from tts import sayText
+#from tts import sayText
 import sys
 from time import sleep
-
-def getFormattedHistory():
-    hist = ''
-    for line in bot.history:
-        hist += '***' + line.split(':', 1)[0] + ':*** ' + line.split(':', 1)[1] + '\n\n'
-    return hist
+import yaml
+from yaml.loader import SafeLoader
+from importlib import import_module
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -19,7 +15,7 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle("QChatBot - " + bot.char_name)
         self.chatHistoryViewer = QTextEdit(readOnly=True)
-        self.chatHistoryViewer.setMarkdown(getFormattedHistory())
+        self.chatHistoryViewer.setMarkdown(bot.getFormattedHistory())
         self.chatHistoryViewer.verticalScrollBar().setValue(self.chatHistoryViewer.verticalScrollBar().maximum())
 #        self.chatHistoryViewer.setFontPointSize(12)
         self.userMessageEditor = QTextEdit()
@@ -57,7 +53,7 @@ class MainWindow(QMainWindow):
                         bot.need_voice = False
                     else:
                         bot.need_voice = not bot.need_voice
-                    sayText('Voice turned on' if bot.need_voice else 'Voice turned off')
+#                    sayText('Voice turned on' if bot.need_voice else 'Voice turned off')
                     self.userMessageEditor.setText('')
             else:    
                 hist = self.chatHistoryViewer.toMarkdown() + '\n\n***You:***  ' + message
@@ -71,8 +67,8 @@ class MainWindow(QMainWindow):
                 self.chatHistoryViewer.setMarkdown(hist)
                 self.chatHistoryViewer.verticalScrollBar().setValue(self.chatHistoryViewer.verticalScrollBar().maximum())
                 QApplication.processEvents()
-                if bot.need_voice:
-                    sayText(answer.split(':', 1)[1], bot.bot_language)
+                # if bot.need_voice:
+                #     sayText(answer.split(':', 1)[1], bot.bot_language)
                 self.sayButton.setEnabled(True)
                 self.userMessageEditor.setFocus()
 
@@ -80,7 +76,18 @@ if len(sys.argv) > 1:
     config_file_name = sys.argv[1]
 else:
     config_file_name = 'config.yaml'
-bot = AnnBot(config_file_name)
+try:
+    with open(config_file_name) as file:
+        config = yaml.load(file, Loader=SafeLoader)
+except Exception:
+    print('Cann\'t read config file ' + config_file_name)
+    exit(0)
+if 'bot_module' not in config['chat_bot'].keys():
+    print('No bot module specified')
+    exit(0)
+bot_module = import_module(config['chat_bot']['bot_module'])
+
+bot = bot_module.ChatBot(config_file_name)
 app = QApplication(sys.argv)
 
 window = MainWindow()
