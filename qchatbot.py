@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QTextEdit
 from PyQt6.QtGui import QTextCursor
 from ann_bot import AnnBot
@@ -68,12 +70,17 @@ class MainWindow(QMainWindow):
                 hist = self.chatHistoryViewer.toMarkdown() + '***' + bot.char_name + ':*** ' + answer.split(':', 1)[1]
                 self.chatHistoryViewer.setMarkdown(hist)
                 self.chatHistoryViewer.verticalScrollBar().setValue(self.chatHistoryViewer.verticalScrollBar().maximum())
+                QApplication.processEvents()
                 if bot.need_voice:
-                    sayText(answer.split(':', 1)[1])
+                    sayText(answer.split(':', 1)[1], bot.bot_language)
                 self.sayButton.setEnabled(True)
                 self.userMessageEditor.setFocus()
 
-bot = AnnBot()
+if len(sys.argv) > 1:
+    config_file_name = sys.argv[1]
+else:
+    config_file_name = 'config.yaml'
+bot = AnnBot(config_file_name)
 app = QApplication(sys.argv)
 
 window = MainWindow()

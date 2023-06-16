@@ -33,17 +33,23 @@ def say_text_yandex(text):
 
 def sayText(text, lang='en'):
     if lang == 'ru':
-        say_text_yandex(text)
+        try:
+            say_text_yandex(text)
+        except Exception:
+            print('Error using Yandex TTS')
+            pass
         return
-    mp3_fp = BytesIO()
-    tts = gTTS(text, lang)
-    tts.write_to_fp(mp3_fp)
-    mp3_fp.seek(0)
-    mp3 = Mpg123()
-    mp3.feed(mp3_fp.read())
-
-    out = Out123()
-
-    for frame in mp3.iter_frames(out.start):
-        out.play(frame)
+    try:
+        mp3_fp = BytesIO()
+        tts = gTTS(text, lang)
+        tts.write_to_fp(mp3_fp)
+        mp3_fp.seek(0)
+        mp3 = Mpg123()
+        mp3.feed(mp3_fp.read())
+        out = Out123()
+        for frame in mp3.iter_frames(out.start):
+            out.play(frame)
+    except Exception:
+        print('Error using Google TTS')
+        pass
 
