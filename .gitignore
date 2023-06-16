@@ -2,7 +2,6 @@ _test/
 # Bot configuration files
 *.yaml
 *.cfg
-*.txt
 
 # Streamlit directory
 .streamlit/
